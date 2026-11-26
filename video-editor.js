@@ -15,6 +15,10 @@
   const setEndButton = byId("setEndBtn");
   const previewButton = byId("previewRangeBtn");
   const clearButton = byId("clearVideoBtn");
+  const fileDetails = byId("fileDetails");
+  const selectionDuration = byId("selectionDuration");
+  const fullVideoButton = byId("fullVideoBtn");
+  const lengthButtons = Array.from(document.querySelectorAll("[data-clip-length]"));
 
   let selectedFile = null;
   let sourceUrl = null;
@@ -42,11 +46,26 @@
   }
   function updateControls() {
     const ready = Boolean(selectedFile && Number.isFinite(video.duration) && video.duration > 0);
-    [startInput, endInput, setStartButton, setEndButton, previewButton, exportButton, clearButton]
+    [startInput, endInput, setStartButton, setEndButton, previewButton, exportButton, clearButton, fullVideoButton, ...lengthButtons]
       .forEach((control) => { control.disabled = !ready; });
   }
   function releaseUrl(url) {
     if (url) URL.revokeObjectURL(url);
+  }
+  function updateSelectionSummary() {
+    const start = Number(startInput.value);
+    const end = Number(endInput.value);
+    selectionDuration.textContent = Number.isFinite(start) && Number.isFinite(end) && end > start
+      ? "Selected: " + (end - start).toFixed(2) + " sec"
+      : "Selected: —";
+  }
+  function applyLength(length) {
+    if (!selectedFile || !Number.isFinite(video.duration)) return;
+    const start = Math.max(0, Math.min(Number(startInput.value) || 0, video.duration));
+    startInput.value = start.toFixed(2);
+    endInput.value = Math.min(video.duration, start + length).toFixed(2);
+    updateSelectionSummary();
+    message("Clip length set to " + (Number(endInput.value) - start).toFixed(2) + " seconds.", "good");
   }
 
   fileInput.addEventListener("change", () => {
@@ -69,6 +88,7 @@
     video.hidden = false;
     empty.hidden = true;
     nameLabel.textContent = file.name;
+    fileDetails.textContent = (file.type || "Video file") + " · " + (file.size / (1024 * 1024)).toFixed(1) + " MB";
     durationLabel.textContent = "Reading duration…";
     updateControls();
     message("Loading video preview…");
@@ -84,6 +104,7 @@
     startInput.max = video.duration;
     endInput.max = video.duration;
     durationLabel.textContent = "Duration: " + seconds(video.duration);
+    updateSelectionSummary();
     updateControls();
     message("Video ready. Set your start and end points, then preview or export the selection.", "good");
   });
@@ -95,11 +116,22 @@
     }
   });
 
+  startInput.addEventListener("input", updateSelectionSummary);
+  endInput.addEventListener("input", updateSelectionSummary);
+  lengthButtons.forEach((button) => button.addEventListener("click", () => applyLength(Number(button.dataset.clipLength))));
+  fullVideoButton.addEventListener("click", () => {
+    startInput.value = "0";
+    endInput.value = video.duration.toFixed(2);
+    updateSelectionSummary();
+    message("Full video selected.", "good");
+  });
   setStartButton.addEventListener("click", () => {
     startInput.value = Math.min(video.currentTime, Number(endInput.value) - 0.1).toFixed(2);
+    updateSelectionSummary();
   });
   setEndButton.addEventListener("click", () => {
     endInput.value = Math.max(video.currentTime, Number(startInput.value) + 0.1).toFixed(2);
+    updateSelectionSummary();
   });
   previewButton.addEventListener("click", async () => {
     if (!validRange()) return;
@@ -210,6 +242,8 @@
     empty.hidden = false;
     nameLabel.textContent = "No video selected";
     durationLabel.textContent = "Duration: —";
+    fileDetails.textContent = "File details appear here";
+    selectionDuration.textContent = "Selected: —";
     startInput.value = "0";
     endInput.value = "0";
     progressBar.style.width = "0%";

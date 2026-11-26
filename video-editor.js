@@ -1,0 +1,222 @@
+(() => {
+  "use strict";
+  const byId = (id) => document.getElementById(id);
+  const fileInput = byId("videoFile");
+  const video = byId("sourceVideo");
+  const empty = byId("videoEmpty");
+  const startInput = byId("videoStart");
+  const endInput = byId("videoEnd");
+  const exportButton = byId("exportClipBtn");
+  const status = byId("videoStatus");
+  const progressBar = byId("exportProgress");
+  const nameLabel = byId("videoName");
+  const durationLabel = byId("videoDuration");
+  const setStartButton = byId("setStartBtn");
+  const setEndButton = byId("setEndBtn");
+  const previewButton = byId("previewRangeBtn");
+  const clearButton = byId("clearVideoBtn");
+
+  let selectedFile = null;
+  let sourceUrl = null;
+  let outputUrl = null;
+  let ffmpeg = null;
+  let ffmpegLoading = null;
+  let previewingRange = false;
+
+  function message(text, kind) {
+    status.textContent = text;
+    status.className = "video-status" + (kind ? " " + kind : "");
+  }
+  function seconds(value) {
+    return Number.isFinite(value) ? value.toFixed(2) + "s" : "—";
+  }
+  function validRange() {
+    const start = Number(startInput.value);
+    const end = Number(endInput.value);
+    if (!selectedFile || !Number.isFinite(start) || !Number.isFinite(end) ||
+        start < 0 || end <= start || end > video.duration + 0.05) {
+      message("Check the clip range. The end must be after the start and within the video duration.", "error");
+      return null;
+    }
+    return { start, end, duration: end - start };
+  }
+  function updateControls() {
+    const ready = Boolean(selectedFile && Number.isFinite(video.duration) && video.duration > 0);
+    [startInput, endInput, setStartButton, setEndButton, previewButton, exportButton, clearButton]
+      .forEach((control) => { control.disabled = !ready; });
+  }
+  function releaseUrl(url) {
+    if (url) URL.revokeObjectURL(url);
+  }
+
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) return;
+    if (!file.type.startsWith("video/")) {
+      message("Please choose a video file.", "error");
+      fileInput.value = "";
+      return;
+    }
+    if (file.size > 250 * 1024 * 1024) {
+      message("This file is over 250 MB. Choose a smaller video for this phone-friendly editor.", "error");
+      fileInput.value = "";
+      return;
+    }
+    selectedFile = file;
+    releaseUrl(sourceUrl);
+    sourceUrl = URL.createObjectURL(file);
+    video.src = sourceUrl;
+    video.hidden = false;
+    empty.hidden = true;
+    nameLabel.textContent = file.name;
+    durationLabel.textContent = "Reading duration…";
+    updateControls();
+    message("Loading video preview…");
+  });
+
+  video.addEventListener("loadedmetadata", () => {
+    if (!Number.isFinite(video.duration) || video.duration <= 0) {
+      message("This video’s duration could not be read by your browser.", "error");
+      return;
+    }
+    startInput.value = "0";
+    endInput.value = video.duration.toFixed(2);
+    startInput.max = video.duration;
+    endInput.max = video.duration;
+    durationLabel.textContent = "Duration: " + seconds(video.duration);
+    updateControls();
+    message("Video ready. Set your start and end points, then preview or export the selection.", "good");
+  });
+  video.addEventListener("error", () => message("Your browser could not preview this video format. Try an MP4 encoded with H.264 video.", "error"));
+  video.addEventListener("timeupdate", () => {
+    if (previewingRange && video.currentTime >= Number(endInput.value)) {
+      video.pause();
+      previewingRange = false;
+    }
+  });
+
+  setStartButton.addEventListener("click", () => {
+    startInput.value = Math.min(video.currentTime, Number(endInput.value) - 0.1).toFixed(2);
+  });
+  setEndButton.addEventListener("click", () => {
+    endInput.value = Math.max(video.currentTime, Number(startInput.value) + 0.1).toFixed(2);
+  });
+  previewButton.addEventListener("click", async () => {
+    if (!validRange()) return;
+    previewingRange = true;
+    video.currentTime = Number(startInput.value);
+    try { await video.play(); }
+    catch (_) { previewingRange = false; message("Tap the video player’s play control to preview this section.", "error"); }
+  });
+
+  async function loadFFmpeg() {
+    if (ffmpeg) return ffmpeg;
+    if (ffmpegLoading) return ffmpegLoading;
+    ffmpegLoading = (async () => {
+      message("Preparing the video engine. The first load needs an internet connection and may take a little while…");
+      const { FFmpeg } = await import("https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js");
+      const { toBlobURL } = await import("https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/esm/index.js");
+      const engine = new FFmpeg();
+      engine.on("progress", ({ progress }) => {
+        const percent = Math.max(0, Math.min(100, Math.round(progress * 100)));
+        progressBar.style.width = percent + "%";
+        message("Exporting clip… " + percent + "%");
+      });
+      engine.on("log", ({ message: logMessage }) => {
+        if (logMessage && /error/i.test(logMessage)) console.warn("ClipForge FFmpeg:", logMessage);
+      });
+      const coreBase = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd";
+      await engine.load({
+        coreURL: await toBlobURL(coreBase + "/ffmpeg-core.js", "text/javascript"),
+        wasmURL: coreBase + "/ffmpeg-core.wasm"
+      });
+      ffmpeg = engine;
+      return engine;
+    })();
+    try { return await ffmpegLoading; }
+    catch (error) { ffmpegLoading = null; throw error; }
+  }
+
+  exportButton.addEventListener("click", async () => {
+    const range = validRange();
+    if (!range) return;
+    if (selectedFile.size > 100 * 1024 * 1024) {
+      message("This file is larger than 100 MB. It may exceed your phone’s available memory. Try a shorter or smaller source video.", "error");
+      return;
+    }
+    exportButton.disabled = true;
+    fileInput.disabled = true;
+    progressBar.style.width = "0%";
+    let inputName = "clipforge-source";
+    let outputName = "clipforge-export.mp4";
+    try {
+      const engine = await loadFFmpeg();
+      const extension = (selectedFile.name.split(".").pop() || "mp4").toLowerCase().replace(/[^a-z0-9]/g, "");
+      inputName += "." + (extension || "mp4");
+      outputName = "clipforge-" + Date.now() + ".mp4";
+      message("Reading your video into the local processing engine…");
+      await engine.writeFile(inputName, new Uint8Array(await selectedFile.arrayBuffer()));
+      message("Exporting the selected section. Keep this tab open…");
+      const result = await engine.exec([
+        "-ss", String(range.start),
+        "-i", inputName,
+        "-t", String(range.duration),
+        "-map", "0:v:0",
+        "-map", "0:a?",
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-crf", "25",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-movflags", "+faststart",
+        outputName
+      ]);
+      if (result !== 0) throw new Error("The video engine could not finish this export. Try a shorter MP4 source.");
+      const output = await engine.readFile(outputName);
+      const blob = new Blob([output], { type: "video/mp4" });
+      releaseUrl(outputUrl);
+      outputUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = outputUrl;
+      link.download = outputName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      progressBar.style.width = "100%";
+      message("Export complete. Your MP4 clip download should now be available.", "good");
+      await engine.deleteFile(inputName).catch(() => {});
+      await engine.deleteFile(outputName).catch(() => {});
+    } catch (error) {
+      console.error("ClipForge export failed:", error);
+      message("Export failed: " + (error && error.message ? error.message : "unknown error") + " Try a shorter H.264 MP4 video and check your internet connection for the first engine load.", "error");
+    } finally {
+      exportButton.disabled = false;
+      fileInput.disabled = false;
+    }
+  });
+
+  clearButton.addEventListener("click", () => {
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+    releaseUrl(sourceUrl);
+    releaseUrl(outputUrl);
+    sourceUrl = null;
+    outputUrl = null;
+    selectedFile = null;
+    fileInput.value = "";
+    video.hidden = true;
+    empty.hidden = false;
+    nameLabel.textContent = "No video selected";
+    durationLabel.textContent = "Duration: —";
+    startInput.value = "0";
+    endInput.value = "0";
+    progressBar.style.width = "0%";
+    previewingRange = false;
+    updateControls();
+    message("Video cleared. Select another file to continue.");
+  });
+
+  updateControls();
+})();

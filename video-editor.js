@@ -125,10 +125,10 @@
       engine.on("log", ({ message: logMessage }) => {
         if (logMessage && /error/i.test(logMessage)) console.warn("ClipForge FFmpeg:", logMessage);
       });
-      const coreBase = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd";
+      const coreBase = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd";
       await engine.load({
         coreURL: await toBlobURL(coreBase + "/ffmpeg-core.js", "text/javascript"),
-        wasmURL: coreBase + "/ffmpeg-core.wasm"
+        wasmURL: await toBlobURL(coreBase + "/ffmpeg-core.wasm", "application/wasm")
       });
       ffmpeg = engine;
       return engine;

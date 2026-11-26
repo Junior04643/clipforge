@@ -18,6 +18,7 @@
   const fileDetails = byId("fileDetails");
   const selectionDuration = byId("selectionDuration");
   const fullVideoButton = byId("fullVideoBtn");
+  const convertButton = byId("convertVideoBtn");
   const lengthButtons = Array.from(document.querySelectorAll("[data-clip-length]"));
 
   let selectedFile = null;
@@ -26,6 +27,7 @@
   let ffmpeg = null;
   let ffmpegLoading = null;
   let previewingRange = false;
+  let conversionInProgress = false;
 
   function message(text, kind) {
     status.textContent = text;
@@ -46,7 +48,7 @@
   }
   function updateControls() {
     const ready = Boolean(selectedFile && Number.isFinite(video.duration) && video.duration > 0);
-    [startInput, endInput, setStartButton, setEndButton, previewButton, exportButton, clearButton, fullVideoButton, ...lengthButtons]
+    [startInput, endInput, setStartButton, setEndButton, previewButton, exportButton, clearButton, fullVideoButton, convertButton, ...lengthButtons]
       .forEach((control) => { control.disabled = !ready; });
   }
   function releaseUrl(url) {
@@ -108,7 +110,13 @@
     updateControls();
     message("Video ready. Set your start and end points, then preview or export the selection.", "good");
   });
-  video.addEventListener("error", () => message("Your browser could not preview this video format. Try an MP4 encoded with H.264 video.", "error"));
+  video.addEventListener("error", () => {
+    if (conversionInProgress) return;
+    const code = video.error ? video.error.code : 0;
+    const reason = ({1:"Playback was interrupted",2:"A media loading error occurred",3:"The browser could not decode this video",4:"This video format or codec is unsupported"})[code] || "The browser could not decode this video";
+    convertButton.disabled = !selectedFile || selectedFile.size > 80 * 1024 * 1024;
+    message(reason + ". Try the built-in compatibility conversion below. It runs on your device and needs no API key.", "error");
+  });
   video.addEventListener("timeupdate", () => {
     if (previewingRange && video.currentTime >= Number(endInput.value)) {
       video.pause();
@@ -168,6 +176,59 @@
     try { return await ffmpegLoading; }
     catch (error) { ffmpegLoading = null; throw error; }
   }
+
+  convertButton.addEventListener("click", async () => {
+    if (!selectedFile || selectedFile.size > 80 * 1024 * 1024) {
+      message("For phone safety, compatibility conversion is limited to videos of 80 MB or less.", "error");
+      return;
+    }
+    conversionInProgress = true;
+    convertButton.disabled = true;
+    exportButton.disabled = true;
+    fileInput.disabled = true;
+    progressBar.style.width = "0%";
+    const inputName = "clipforge-original";
+    const outputName = "clipforge-compatible.mp4";
+    try {
+      const engine = await loadFFmpeg();
+      message("Converting your source to browser-friendly H.264/AAC. Keep this page open; this may take a few minutes on a phone…");
+      await engine.writeFile(inputName, new Uint8Array(await selectedFile.arrayBuffer()));
+      const result = await engine.exec([
+        "-i", inputName,
+        "-map", "0:v:0",
+        "-map", "0:a?",
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-crf", "28",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "96k",
+        "-movflags", "+faststart",
+        outputName
+      ]);
+      if (result !== 0) throw new Error("The converter could not decode this source. It may use an unsupported codec.");
+      const data = await engine.readFile(outputName);
+      const compatible = new File([data], "clipforge-compatible.mp4", {type:"video/mp4"});
+      selectedFile = compatible;
+      releaseUrl(sourceUrl);
+      sourceUrl = URL.createObjectURL(compatible);
+      video.src = sourceUrl;
+      video.load();
+      nameLabel.textContent = compatible.name;
+      fileDetails.textContent = "Converted H.264/AAC · " + (compatible.size / (1024 * 1024)).toFixed(1) + " MB";
+      message("Conversion finished. Loading the compatible preview…", "good");
+      await engine.deleteFile(inputName).catch(() => {});
+      await engine.deleteFile(outputName).catch(() => {});
+    } catch (error) {
+      console.error("ClipForge compatibility conversion failed:", error);
+      message("Conversion failed: " + (error && error.message ? error.message : "unknown error") + " Try exporting the source from a trusted editor as MP4 (H.264 video + AAC audio).", "error");
+      convertButton.disabled = false;
+    } finally {
+      conversionInProgress = false;
+      exportButton.disabled = false;
+      fileInput.disabled = false;
+    }
+  });
 
   exportButton.addEventListener("click", async () => {
     const range = validRange();
@@ -237,6 +298,7 @@
     sourceUrl = null;
     outputUrl = null;
     selectedFile = null;
+    convertButton.disabled = true;
     fileInput.value = "";
     video.hidden = true;
     empty.hidden = false;

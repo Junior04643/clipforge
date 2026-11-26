@@ -18,15 +18,27 @@
 .video-status{font-size:13px;color:var(--muted);min-height:22px;margin-top:10px}
 .video-status.error{color:#ff9eae}.video-status.good{color:var(--cyan)}
 @media(max-width:600px){.range-grid{grid-template-columns:1fr}}
+.upload-dropzone{border:1.5px dashed #65539a;background:linear-gradient(135deg,rgba(157,123,255,.12),rgba(92,225,210,.05));border-radius:16px;padding:24px 16px;text-align:center;transition:border-color .2s,background .2s}
+.upload-dropzone.dragover{border-color:var(--cyan);background:rgba(92,225,210,.12)}
+.upload-icon{font-size:30px;margin-bottom:8px}.upload-dropzone strong{display:block;font-size:16px}.upload-dropzone p{color:var(--muted);font-size:13px;margin:6px 0 14px}.upload-input{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 </style></head>
 <body><main class="shell">
 <header class="top"><div class="brand">CLIP<span>FORGE</span></div><div class="pill">CREATOR WORKSPACE · MVP 0.1</div></header>
 <section class="hero"><div class="eyebrow">From long-form to short-form</div><h1>Make every moment<br>work harder.</h1><p>Plan stronger clips, shape scroll-stopping hooks, prepare captions and organise your publishing pipeline — all in one focused workspace.</p><div class="actions"><button class="btn primary" onclick="document.querySelector('#planner').scrollIntoView({behavior:'smooth'})">Open clip planner ↘</button><button class="btn" onclick="exportBackup()">Export workspace</button></div></section>
 <section class="grid">
+<article class="card full" id="uploadSection">
+<h2>Upload your video <span class="tag">DEVICE UPLOAD</span></h2>
+<p class="muted">Bring a video into ClipForge to start editing. Choose a file from your phone or drag one into the upload area. Files stay on your device and are processed in this browser.</p>
+<div class="upload-dropzone" id="uploadDropzone" role="group" aria-label="Video upload area">
+<div class="upload-icon" aria-hidden="true">⇧</div><strong>Drop your video here</strong><p>or browse your device · MP4, MOV, WebM and other browser-supported video formats</p>
+<label class="btn primary" for="videoFile">Choose video</label>
+<input class="upload-input" id="videoFile" type="file" accept="video/*" aria-label="Choose a video file">
+</div>
+<p class="video-status">Tip: start with a short video for smoother processing on a phone.</p>
+</article>
 <article class="card full" id="videoEditor">
 <h2>Video workspace <span class="tag">LOCAL MP4 EXPORT</span></h2>
-<p class="muted">Choose a video from your device, set the exact section you want, then export a separate MP4 clip. Your original file is not changed or uploaded.</p>
-<div class="field"><label for="videoFile">Choose a video (MP4, MOV, WebM and other browser-supported formats)</label><input id="videoFile" type="file" accept="video/*"></div>
+<p class="muted">Your selected video appears below. Set the exact section you want, preview it, then export a separate MP4 clip. Your original file is not changed or uploaded.</p>
 <div class="video-stage">
 <video id="sourceVideo" controls playsinline preload="metadata" hidden></video>
 <div id="videoEmpty" class="empty">Your video preview will appear here after you select a file.</div>
@@ -52,7 +64,7 @@
 <article class="card half"><h2>Hook starters</h2><p class="muted">Use these as starting points; make them accurate to your video.</p><div class="list" id="templates"></div></article>
 <article class="card half"><h2>Caption cue editor</h2><p class="muted">Build subtitle cues and export an SRT file for your editor.</p><div class="field"><label>Caption text</label><textarea id="captionText" placeholder="Type one caption line..."></textarea></div><div class="row"><div class="field"><label>Start (seconds)</label><input id="capStart" type="number" min="0" value="0"></div><div class="field"><label>End (seconds)</label><input id="capEnd" type="number" min="0" value="3"></div></div><button class="btn" onclick="addCaption()">＋ Add caption cue</button><div id="captions" class="list"></div><button class="btn" style="margin-top:12px" onclick="exportSrt()">Export SRT</button></article>
 <article class="card half"><h2>Publishing queue</h2><p class="muted">Track what needs to happen next.</p><div class="field"><label>Post title</label><input id="postTitle" placeholder="A lesson I wish I knew earlier"></div><div class="row"><div class="field"><label>Platform</label><select id="postPlatform"><option>TikTok</option><option>YouTube Shorts</option><option>Instagram Reels</option></select></div><div class="field"><label>Target date</label><input id="postDate" type="date"></div></div><button class="btn" onclick="addPost()">＋ Add to queue</button><div id="posts" class="list"></div></article>
-</section><footer class="footer">ClipForge · A practical creator-planning MVP. Video rendering and AI processing are not included in this version.</footer>
+</section><footer class="footer">ClipForge · Creator workspace with local video upload and browser-based MP4 clip export. AI transcription and automated highlight detection are not included yet.</footer>
 </main>
 <script>
 const KEY='clipforge-mvp-v1';let state=JSON.parse(localStorage.getItem(KEY)||'{"clips":[],"captions":[],"posts":[]}');
@@ -74,5 +86,7 @@ function download(name,data,type){let a=document.createElement('a'),u=URL.create
 function exportSrt(){download('clipforge-captions.srt',state.captions.map((x,i)=>(i+1)+'\n'+stamp(x.start)+' --> '+stamp(x.end)+'\n'+x.text).join('\n\n'),'text/plain')}
 function exportBackup(){download('clipforge-backup.json',JSON.stringify(state,null,2),'application/json')}
 render();
+</script><script>
+(() => { const zone=document.getElementById("uploadDropzone"); const input=document.getElementById("videoFile"); if(!zone||!input)return; ["dragenter","dragover"].forEach(type=>zone.addEventListener(type,event=>{event.preventDefault();zone.classList.add("dragover")})); ["dragleave","drop"].forEach(type=>zone.addEventListener(type,event=>{event.preventDefault();zone.classList.remove("dragover")})); zone.addEventListener("drop",event=>{const file=event.dataTransfer&&event.dataTransfer.files&&event.dataTransfer.files[0];if(!file)return;if(!file.type.startsWith("video/")){alert("Please drop a video file.");return;}const transfer=new DataTransfer();transfer.items.add(file);input.files=transfer.files;input.dispatchEvent(new Event("change",{bubbles:true}));}); })();
 </script><script src="./video-editor.js"></script>
 </body></html>
